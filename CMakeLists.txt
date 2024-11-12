@@ -169,7 +169,8 @@ set(common_srcs
   common/environment.cc
   common/armor.cc
   common/safe_io.cc
-  common/buffer.cc)
+  common/buffer.cc
+  common/uuid.cc)
 
 # 设置库的源文件
 set(SOURCES
