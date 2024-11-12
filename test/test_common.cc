@@ -4,6 +4,8 @@
 #include <cassert>
 #include <stdexcept>
 #include <climits>
+
+#include <fcntl.h>
 #include <boost/algorithm/string.hpp>
 
 #include "gtest/gtest.h"
@@ -16,6 +18,7 @@
 #include "../common/crc/crc32_sctp.h"
 #include "../common/crc/crc32.h"
 #include "../common/mempool.h"
+#include "../common/safe_io.h"
 
 using namespace std;
 
@@ -805,6 +808,25 @@ TEST(mempool, check_shard_select)
   // If more than half of the shards did not get anything,
   // the distribution is bad enough to deserve a failure.
   EXPECT_LT(missed, mempool::num_shards / 2);
+}
+
+TEST(SafeIO, safe_read_file) {
+  const char *fname = "safe_read_testfile";
+  ::unlink(fname);
+  int fd = ::open(fname, O_RDWR|O_CREAT|O_TRUNC, 0600);
+  ASSERT_NE(fd, -1);
+  const char buf[] = "0123456789";
+  for (int i = 0; i < 8; i++) {
+    ASSERT_EQ((ssize_t)sizeof(buf), write(fd, buf, sizeof(buf)));
+  }
+  ::close(fd);
+  char rdata[80];
+  ASSERT_EQ((int)sizeof(rdata),
+            safe_read_file(".", fname, rdata, sizeof(rdata)));
+  for (char *p = rdata, *end = rdata+sizeof(rdata); p < end; p+=sizeof(buf)) {
+    ASSERT_EQ(0, std::memcmp(p, buf, std::min(size_t(end-p), sizeof(buf))));
+  }
+  ::unlink(fname);
 }
 
 int main(int argc, char **argv)

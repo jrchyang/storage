@@ -164,7 +164,12 @@ set(common_srcs
   common/formatter.cc
   common/reverse.cc
   common/page.cc
-  common/mempool.cc)
+  common/mempool.cc
+  common/error_code.cc
+  common/environment.cc
+  common/armor.cc
+  common/safe_io.cc
+  common/buffer.cc)
 
 # 设置库的源文件
 set(SOURCES
