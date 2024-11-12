@@ -15,6 +15,9 @@
 #include "../common/crc/crc32_intel_baseline.h"
 #include "../common/crc/crc32_sctp.h"
 #include "../common/crc/crc32.h"
+#include "../common/mempool.h"
+
+using namespace std;
 
 // a dummy function, so we can check "foo" in the backtrace.
 // do not mark this function as static or put it into an anonymous namespace,
@@ -134,23 +137,23 @@ TEST(Intarith, p2family) {
   ASSERT_EQ(0x5600, p2roundup(0x5600, 0x100));
 }
 
-TEST(Intarith, popcount) {
+TEST(Intarith, common_popcount) {
   // char, unsigned char
-  EXPECT_EQ(0, popcount((char)(0)));
-  EXPECT_EQ(1, popcount((unsigned char)(1)));
+  EXPECT_EQ(0, common_popcount((char)(0)));
+  EXPECT_EQ(1, common_popcount((unsigned char)(1)));
   // short, unsigned short
-  EXPECT_EQ(1, popcount((short)0b10));
-  EXPECT_EQ(2, popcount((unsigned char)(0b11U)));
+  EXPECT_EQ(1, common_popcount((short)0b10));
+  EXPECT_EQ(2, common_popcount((unsigned char)(0b11U)));
   // int, unsigned int
-  EXPECT_EQ(sizeof(int) * CHAR_BIT, popcount(-1));
-  EXPECT_EQ(0, popcount(0));
+  EXPECT_EQ(sizeof(int) * CHAR_BIT, common_popcount(-1));
+  EXPECT_EQ(0, common_popcount(0));
   EXPECT_EQ(1, popcount(0b10U));
   // long, unsigned long
-  EXPECT_EQ(1, popcount(0b1000'0000'0000'0000L));
-  EXPECT_EQ(3, popcount(0b1100'1000'0000'0000UL));
+  EXPECT_EQ(1, common_popcount(0b1000'0000'0000'0000L));
+  EXPECT_EQ(3, common_popcount(0b1100'1000'0000'0000UL));
   // long long, unsigned long long
-  EXPECT_EQ(4, popcount(0x1111'0000LL));
-  EXPECT_EQ(1, popcount(0x1000'0000ULL));
+  EXPECT_EQ(4, common_popcount(0x1111'0000LL));
+  EXPECT_EQ(1, common_popcount(0x1000'0000ULL));
 }
 
 TEST(Crc32c, Small) {
@@ -494,5 +497,322 @@ TEST(Crc32c, zeros_performance) {
   }
   end = clock_now();
   std::cout << "iterations="<< ITER*31 << " time=" << (double)(end-start) << std::endl;
+}
+
+void check_usage(mempool::pool_index_t ix)
+{
+  mempool::pool_t *pool = &mempool::get_pool(ix);
+  mempool::stats_t total;
+  map<std::string, mempool::stats_t> m;
+
+  pool->get_stats(&total, &m);
+  size_t usage = pool->allocated_bytes();
+  size_t sum = 0;
+  for (auto& p : m) {
+    sum += p.second.bytes;
+  }
+  if (sum != usage) {
+    TableFormatter jf;
+    pool->dump(&jf);
+    jf.flush(std::cout);
+  }
+  EXPECT_EQ(sum, usage);
+}
+
+template<typename A, typename B>
+void eq_elements(const A& a, const B& b)
+{
+  auto lhs = a.begin();
+  auto rhs = b.begin();
+  while (lhs != a.end()) {
+    EXPECT_EQ(*lhs,*rhs);
+    lhs++;
+    rhs++;
+  }
+  EXPECT_EQ(rhs,b.end());
+}
+
+template<typename A, typename B>
+void eq_pairs(const A& a, const B& b)
+{
+  auto lhs = a.begin();
+  auto rhs = b.begin();
+  while (lhs != a.end()) {
+    EXPECT_EQ(lhs->first,rhs->first);
+    EXPECT_EQ(lhs->second,rhs->second);
+    lhs++;
+    rhs++;
+  }
+  EXPECT_EQ(rhs,b.end());
+}
+
+#define MAKE_INSERTER(inserter)        \
+  template<typename A,typename B>      \
+void do_##inserter(A& a, B& b, int count, int base) {  \
+  for (int i = 0; i < count; ++i) {      \
+    a.inserter(base + i);        \
+    b.inserter(base + i);        \
+  }              \
+}
+
+MAKE_INSERTER(push_back);
+MAKE_INSERTER(insert);
+
+template<typename A,typename B>
+void do_insert_key(A& a, B& b, int count, int base)
+{
+  for (int i = 0; i < count; ++i) {
+    a.insert(make_pair(base+i,base+i));
+    b.insert(make_pair(base+i,base+i));
+    check_usage(mempool::unittest::id);
+  }
+}
+
+TEST(mempool, vector_context)
+{
+  check_usage(mempool::unittest::id);
+  EXPECT_EQ(mempool::unittest::allocated_bytes(), 0u);
+  EXPECT_EQ(mempool::unittest::allocated_items(), 0u);
+  for (unsigned i = 0; i < 10; ++i) {
+    vector<int> a;
+    mempool::unittest::vector<int> b,c;
+    eq_elements(a,b);
+    do_push_back(a,b,i,i);
+    eq_elements(a,b);
+    check_usage(mempool::unittest::id);
+
+    mempool::stats_t total;
+    map<std::string,mempool::stats_t> by_type;
+    mempool::get_pool(mempool::unittest::id).get_stats(&total, &by_type);
+    EXPECT_GE(mempool::unittest::allocated_bytes(), i * 4u);
+    EXPECT_GE(mempool::unittest::allocated_items(), i);
+
+    c.swap(b);
+    eq_elements(a,c);
+    check_usage(mempool::unittest::id);
+    a.clear();
+    b.clear();
+    c.clear();
+  }
+}
+
+TEST(mempool, list_context)
+{
+  for (unsigned i = 1; i < 10; ++i) {
+    list<int> a;
+    mempool::unittest::list<int> b,c;
+    eq_elements(a,b);
+    do_push_back(a,b,i,i);
+    eq_elements(a,b);
+    c.swap(b);
+    eq_elements(a,c);
+    a.erase(a.begin());
+    c.erase(c.begin());
+    eq_elements(a,c);
+    a.clear();
+    b.clear();
+    c.clear();
+    do_push_back(a,b,i,i);
+    c.splice(c.begin(),b,b.begin(),b.end());
+
+    mempool::stats_t total;
+    map<std::string,mempool::stats_t> by_type;
+    mempool::get_pool(mempool::unittest::id).get_stats(&total, &by_type);
+    EXPECT_GE(mempool::unittest::allocated_bytes(), i * 4u);
+    EXPECT_EQ(mempool::unittest::allocated_items(), i);
+
+    eq_elements(a,c);
+    check_usage(mempool::unittest::id);
+  }
+}
+
+TEST(mempool, set_context)
+{
+  for (int i = 0; i < 10; ++i) {
+    set<int> a;
+    mempool::unittest::set<int> b;
+    do_insert(a,b,i,i);
+    eq_elements(a,b);
+    check_usage(mempool::unittest::id);
+  }
+
+  for (int i = 1; i < 10; ++i) {
+    set<int> a;
+    mempool::unittest::set<int> b;
+    do_insert(a,b,i,0);
+    EXPECT_NE(a.find(i/2),a.end());
+    EXPECT_NE(b.find(i/2),b.end());
+    a.erase(a.find(i/2));
+    b.erase(b.find(i/2));
+    eq_elements(a,b);
+    check_usage(mempool::unittest::id);
+  }
+}
+
+struct obj {
+  MEMPOOL_CLASS_HELPERS();
+  int a;
+  int b;
+  obj() : a(1), b(1) {}
+  explicit obj(int _a) : a(_a), b(2) {}
+  obj(int _a,int _b) : a(_a), b(_b) {}
+  friend inline bool operator<(const obj& l, const obj& r) {
+    return l.a < r.a;
+  }
+};
+MEMPOOL_DEFINE_OBJECT_FACTORY(obj, obj, unittest);
+
+TEST(mempool, test_factory)
+{
+  obj *o1 = new obj();
+  obj *o2 = new obj(10);
+  obj *o3 = new obj(20,30);
+  check_usage(mempool::unittest::id);
+  EXPECT_NE(o1,nullptr);
+  EXPECT_EQ(o1->a,1);
+  EXPECT_EQ(o1->b,1);
+  EXPECT_EQ(o2->a,10);
+  EXPECT_EQ(o2->b,2);
+  EXPECT_EQ(o3->a,20);
+  EXPECT_EQ(o3->b,30);
+
+  delete o1;
+  delete o2;
+  delete o3;
+  check_usage(mempool::unittest::id);
+}
+
+TEST(mempool, vector)
+{
+  {
+    mempool::unittest::vector<int> v;
+    v.push_back(1);
+    v.push_back(2);
+  }
+  {
+    mempool::unittest::vector<obj> v;
+    v.push_back(obj());
+    v.push_back(obj(1));
+  }
+}
+
+TEST(mempool, set)
+{
+  mempool::unittest::set<int> set_int;
+  set_int.insert(1);
+  set_int.insert(2);
+  mempool::unittest::set<obj> set_obj;
+  set_obj.insert(obj());
+  set_obj.insert(obj(1));
+  set_obj.insert(obj(1, 2));
+}
+
+TEST(mempool, map)
+{
+  {
+    mempool::unittest::map<int,int> v;
+    v[1] = 2;
+    v[3] = 4;
+  }
+  {
+    mempool::unittest::map<int,obj> v;
+    v[1] = obj();
+    v[2] = obj(2);
+    v[3] = obj(2, 3);
+  }
+}
+
+TEST(mempool, list)
+{
+  {
+    mempool::unittest::list<int> v;
+    v.push_back(1);
+    v.push_back(2);
+  }
+  {
+    mempool::unittest::list<obj> v;
+    v.push_back(obj());
+    v.push_back(obj(1));
+  }
+}
+
+TEST(mempool, dump)
+{
+  ostringstream ostr;
+
+  Formatter* f = Formatter::create("table", "table", "table");
+  mempool::dump(f);
+  f->flush(ostr);
+
+  delete f;
+  ASSERT_NE(ostr.str().find(mempool::get_pool_name((mempool::pool_index_t)0)),
+            std::string::npos);
+
+  ostr.str("");
+
+  f = Formatter::create("json-pretty", "json-pretty", "json-pretty");
+  mempool::dump(f);
+  f->flush(ostr);
+  delete f;
+
+  ASSERT_NE(ostr.str().find(mempool::get_pool_name((mempool::pool_index_t)0)),
+            std::string::npos);
+}
+
+TEST(mempool, unordered_map)
+{
+  mempool::unittest::unordered_map<int,obj> h;
+  h[1] = obj();
+  h[2] = obj(1);
+}
+
+TEST(mempool, string_test)
+{
+  mempool::unittest::string s;
+  s.reserve(100);
+  EXPECT_GE(mempool::unittest::allocated_items(), s.capacity() + 1u); // +1 for zero-byte termination :
+  for (size_t i = 0; i < 10; ++i) {
+    s += '1';
+    s.append(s);
+    EXPECT_GE(mempool::unittest::allocated_items(), s.capacity() + 1u);
+  }
+}
+
+TEST(mempool, check_shard_select)
+{
+  const size_t samples = mempool::num_shards * 100;
+  std::atomic_int shards[mempool::num_shards] = {0};
+  std::vector<std::thread> workers;
+  for (size_t i = 0; i < samples; i++) {
+    workers.push_back(
+    std::thread([&](){
+      size_t i = mempool::pool_t::pick_a_shard_int();
+      shards[i]++;
+      }));
+  }
+  for (auto& t:workers) {
+    t.join();
+  }
+  workers.clear();
+
+  size_t missed = 0;
+  for (size_t i = 0; i < mempool::num_shards; i++) {
+    if (shards[i] == 0) {
+      missed++;
+    }
+  }
+
+  // If more than half of the shards did not get anything,
+  // the distribution is bad enough to deserve a failure.
+  EXPECT_LT(missed, mempool::num_shards / 2);
+}
+
+int main(int argc, char **argv)
+{
+  // enable debug mode for the tests
+  mempool::set_debug_mode(true);
+
+  ::testing::InitGoogleTest(&argc, argv);
+  return RUN_ALL_TESTS();
 }
 

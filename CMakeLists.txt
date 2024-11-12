@@ -161,8 +161,10 @@ set(common_srcs
   common/dout.cc
   common/backtrace.cc
   common/assertion.cc
+  common/formatter.cc
   common/reverse.cc
-  common/formatter.cc)
+  common/page.cc
+  common/mempool.cc)
 
 # 设置库的源文件
 set(SOURCES

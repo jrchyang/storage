@@ -164,7 +164,7 @@ inline typename std::enable_if<
 
 // count the bits set to 1, a.k.a. population count
 template<class T>
-unsigned popcount(T v) {
+unsigned common_popcount(T v) {
   static_assert(sizeof(T) <= sizeof(unsigned long long), "type too large");
   if constexpr (sizeof(T) <= sizeof(unsigned int)) {
     return __builtin_popcount(v);
