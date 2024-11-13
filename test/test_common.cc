@@ -4,11 +4,14 @@
 #include <cassert>
 #include <stdexcept>
 #include <climits>
+#include <map>
+#include <filesystem>
 
 #include <fcntl.h>
 #include <boost/algorithm/string.hpp>
 
 #include "gtest/gtest.h"
+#include "../common/stringify.h"
 #include "../common/backtrace.h"
 #include "../common/clock.h"
 #include "../common/assertion.h"
@@ -19,6 +22,10 @@
 #include "../common/crc/crc32.h"
 #include "../common/mempool.h"
 #include "../common/safe_io.h"
+#include "../common/global_definition.h"
+#include "../common/global_context.h"
+#include "../common/code_environment.h"
+#include "../common/debug_log.h"
 
 using namespace std;
 
@@ -827,6 +834,35 @@ TEST(SafeIO, safe_read_file) {
     ASSERT_EQ(0, std::memcmp(p, buf, std::min(size_t(end-p), sizeof(buf))));
   }
   ::unlink(fname);
+}
+
+#undef log_prefix
+#define log_prefix "unittest"
+
+TEST(Logger, debug_log) {
+  std::map<string, string> cfg;
+  InitGlobalContext(cfg);
+
+  string log_path = std::filesystem::current_path();
+  string log_file = log_path + "/" + stringify(DEFAULT_LOG_DIR_SUFFIX) +
+                    "/" + get_process_name_cpp() + ".log";
+
+  auto logger = spdlog::get("baseLogger");
+  SPDLOG_LOGGER_INFO(logger, "Support for floats {:03.2f}", 1.23456);
+  SPDLOG_LOGGER_WARN(logger, "Easy padding in numbers like {:08d}", 12);
+
+  ldebug_logger(logger, "logger debug in unittest");
+  ldebug("debug in unittest");
+  linfo_logger(logger, "logger info in unittest {}", 1);
+  linfo("info in unittest {}", 1);
+  lwarn_logger(logger, "logger warn in unittest {}", "hello");
+  lwarn("warn in unittest {}", "hello");
+  lerr_logger(logger, "logger error in unittest {}", "world");
+  lerr("error in unittest {}", "world");
+  lcritical_logger(logger, "logger critical in unittest {:03.2f}", 1.23456);
+  lcritical("critical in unittest {:03.2f}", 1.23456);
+
+  ASSERT_TRUE(filesystem::exists(log_file));
 }
 
 int main(int argc, char **argv)

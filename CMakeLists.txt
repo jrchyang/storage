@@ -95,6 +95,15 @@ list(APPEND target_deps
   Boost::filesystem)
 add_compile_options($<$<COMPILE_LANGUAGE:CXX>:-fpermissive>)
 
+# spdlog
+find_path(spdlog_INCLUDE_DIR NAMES spdlog/spdlog.h)
+if(spdlog_INCLUDE_DIR)
+  message(STATUS "found spdlog in ${spdlog_INCLUDE_DIR}")
+  include_directories(SYSTEM "${spdlog_INCLUDE_DIR}")
+else(spdlog_INCLUDE_DIR)
+  message(FATAL_ERROR "spdlog not found")
+endif(spdlog_INCLUDE_DIR)
+
 # arch
 include(SIMDExt)
 if(HAVE_INTEL)
@@ -170,7 +179,9 @@ set(common_srcs
   common/armor.cc
   common/safe_io.cc
   common/buffer.cc
-  common/uuid.cc)
+  common/uuid.cc
+  common/code_environment.cc
+  common/global_context.cc)
 
 # 设置库的源文件
 set(SOURCES
