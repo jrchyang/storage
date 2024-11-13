@@ -348,7 +348,7 @@ typedef coarse_real_clock::time_point coarse_real_time;
 // Monotonic times should never be serialized or communicated
 // between machines, since they are incomparable. Thus we also don't
 // make any provision for converting between
-// std::chrono::steady_clock time and ceph::mono_clock time.
+// std::chrono::steady_clock time and mono_clock time.
 typedef mono_clock::time_point mono_time;
 typedef coarse_mono_clock::time_point coarse_mono_time;
 
@@ -444,16 +444,6 @@ inline timespan abs(signedspan z) {
 }
 inline timespan to_timespan(signedspan z) {
   if (z < signedspan::zero()) {
-    //ceph_assert(z >= signedspan::zero());
-    // There is a kernel bug that seems to be triggering this assert.  We've
-    // seen it in:
-    //   centos 8.1: 4.18.0-147.el8.x86_64
-    //   debian 10.3: 4.19.0-8-amd64
-    //   debian 10.1: 4.19.67-2+deb10u1
-    //   ubuntu 18.04
-    // see bugs:
-    //   https://tracker.ceph.com/issues/43365
-    //   https://tracker.ceph.com/issues/44078
     z = signedspan::zero();
   }
   return std::chrono::duration_cast<timespan>(z);
